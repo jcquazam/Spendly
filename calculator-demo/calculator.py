@@ -3,6 +3,7 @@ import ast
 from prompts import CALCULATOR_PROMPT
 
 ALLOWED_CHARACTERS = set("0123456789 +-*/%().")
+MAX_EXPONENT = 100
 
 # AST node types that make up a plain arithmetic expression
 ALLOWED_NODES = (
@@ -35,7 +36,16 @@ def validate_expression(expression):
         tree = ast.parse(expression.strip(), mode="eval")
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return False
-    return all(isinstance(node, ALLOWED_NODES) for node in ast.walk(tree))
+    for node in ast.walk(tree):
+        if not isinstance(node, ALLOWED_NODES):
+            return False
+        # Stop expressions like 9**9**9 that would be enormous if ever evaluated
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            if not (isinstance(node.left, ast.Constant) and isinstance(node.right, ast.Constant)):
+                return False
+            if abs(node.right.value) > MAX_EXPONENT:
+                return False
+    return True
 
 # Set to True to skip the Anthropic API and use a fake response instead.
 # Set to False to call the real API (needs the ANTHROPIC_API_KEY environment variable).
