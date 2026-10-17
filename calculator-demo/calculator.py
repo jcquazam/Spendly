@@ -1,5 +1,7 @@
 import ast
+import json
 
+from llm_service import get_model_response, stream_model_response
 from prompts import CALCULATOR_PROMPT
 
 ALLOWED_CHARACTERS = set("0123456789 +-*/%().")
@@ -47,36 +49,39 @@ def validate_expression(expression):
                 return False
     return True
 
-# Set to True to skip the Anthropic API and use a fake response instead.
-# Set to False to call the real API (needs the ANTHROPIC_API_KEY environment variable).
+# Set to True to skip the real API and use a fake response instead.
+# Set to False to call the real API (needs the OPENAI_API_KEY environment variable).
 DEMO_MODE = True
 
 user_input = input("Enter a math question: ")
 prompt = CALCULATOR_PROMPT.format(user_input=user_input)
 
+streamed = False
+
 if DEMO_MODE:
-    # Pretend the model answered with this expression
-    expression = "500 * 25 / 100"
+    expression = get_model_response(prompt)
 else:
-    # Imported here so demo mode works without the anthropic package installed
-    import anthropic
+    # Print each chunk as it arrives and collect them into the full expression
+    chunks = []
+    try:
+        for chunk in stream_model_response(prompt):
+            print(chunk, end="", flush=True)
+            chunks.append(chunk)
+    except Exception:
+        print("Model request failed")
+        raise SystemExit(1)
+    print()
+    expression = "".join(chunks).strip()
+    streamed = True
 
-    # Reads the API key from the ANTHROPIC_API_KEY environment variable
-    client = anthropic.Anthropic()
+try:
+    expression = json.loads(expression)["expression"]
+except (json.JSONDecodeError, TypeError, KeyError):
+    print("Invalid model response")
+    raise SystemExit(1)
 
-    response = client.messages.create(
-        model="claude-opus-5-5",
-        max_tokens=16000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    # The response is a list of content blocks; keep the text one
-    expression = ""
-    for block in response.content:
-        if block.type == "text":
-            expression = block.text.strip()
-
-if validate_expression(expression):
-    print(expression)
+if isinstance(expression, str) and validate_expression(expression):
+    if not streamed:
+        print(expression)
 else:
     print("Invalid model response")
